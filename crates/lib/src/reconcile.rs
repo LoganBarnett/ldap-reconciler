@@ -251,7 +251,24 @@ fn order_dns_for_creation<'a>(
   dns: impl Iterator<Item = &'a String>,
 ) -> Vec<&'a String> {
   let mut dn_list: Vec<&String> = dns.collect();
-  dn_list.sort_by_key(|dn| dn_depth(dn));
+  // Primary: shallowest entries first (parents before children).
+  // Secondary: within the same depth, entries whose RDN starts with `uid=`
+  // sort before others.  This ensures user entries are added before group
+  // entries that reference them via member attributes, which is required
+  // when referential-integrity overlays are active.
+  dn_list.sort_by(|a, b| {
+    let depth_cmp = dn_depth(a).cmp(&dn_depth(b));
+    if depth_cmp != std::cmp::Ordering::Equal {
+      return depth_cmp;
+    }
+    let a_uid = a.to_lowercase().starts_with("uid=");
+    let b_uid = b.to_lowercase().starts_with("uid=");
+    match (a_uid, b_uid) {
+      (true, false) => std::cmp::Ordering::Less,
+      (false, true) => std::cmp::Ordering::Greater,
+      _ => a.cmp(b),
+    }
+  });
   dn_list
 }
 
