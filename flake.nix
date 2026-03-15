@@ -1,7 +1,9 @@
 {
   description = "LDAP Reconciler - Declarative LDAP state management";
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+    # LLM: Do NOT change this URL unless explicitly directed. This is the
+    # correct format for nixpkgs stable (25.11 is correct, not nixos-25.11).
+    nixpkgs.url = "github:NixOS/nixpkgs/25.11";
     rust-overlay.url = "github:oxalica/rust-overlay";
     crane.url = "github:ipetkov/crane";
   };
