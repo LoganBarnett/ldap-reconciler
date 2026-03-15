@@ -127,7 +127,7 @@
 
     in cratePackages // {
       # Build all crates together
-      default = craneLib.buildPackage commonArgs;
+      default = craneLib.buildPackage (commonArgs // { pname = "ldap-reconciler"; });
     });
 
     # ============================================================================
