@@ -41,16 +41,35 @@ pub struct CliRaw {
   #[arg(short, long, env = "CONFIG_FILE")]
   pub config: Option<PathBuf>,
 
-  /// Example: Name to greet
-  #[arg(short, long)]
-  pub name: Option<String>,
+  /// LDAP server URL (e.g., ldap://localhost:389)
+  #[arg(long, env = "LDAP_URL")]
+  pub ldap_url: Option<String>,
+
+  /// LDAP bind DN for authentication
+  #[arg(long, env = "LDAP_BIND_DN")]
+  pub ldap_bind_dn: Option<String>,
+
+  /// LDAP bind password
+  #[arg(long, env = "LDAP_PASSWORD")]
+  pub ldap_password: Option<String>,
+
+  /// Path to JSON5 desired state file
+  #[arg(short, long, env = "STATE_FILE")]
+  pub state_file: Option<PathBuf>,
+
+  /// Dry run mode - show what would be changed without applying
+  #[arg(long, default_value = "false")]
+  pub dry_run: bool,
 }
 
 #[derive(Debug, Deserialize, Default)]
 pub struct ConfigFileRaw {
   pub log_level: Option<String>,
   pub log_format: Option<String>,
-  pub name: Option<String>,
+  pub ldap_url: Option<String>,
+  pub ldap_bind_dn: Option<String>,
+  pub ldap_password: Option<String>,
+  pub state_file: Option<PathBuf>,
 }
 
 impl ConfigFileRaw {
@@ -76,7 +95,11 @@ impl ConfigFileRaw {
 pub struct Config {
   pub log_level: LogLevel,
   pub log_format: LogFormat,
-  pub name: String,
+  pub ldap_url: String,
+  pub ldap_bind_dn: String,
+  pub ldap_password: String,
+  pub state_file: PathBuf,
+  pub dry_run: bool,
 }
 
 impl Config {
@@ -110,15 +133,49 @@ impl Config {
       .parse::<LogFormat>()
       .map_err(|e| ConfigError::Validation(e.to_string()))?;
 
-    let name = cli
-      .name
-      .or(config_file.name)
-      .unwrap_or_else(|| "World".to_string());
+    let ldap_url = cli.ldap_url.or(config_file.ldap_url).ok_or_else(|| {
+      ConfigError::Validation(
+        "LDAP URL is required (use --ldap-url or set in config file)"
+          .to_string(),
+      )
+    })?;
+
+    let ldap_bind_dn = cli
+      .ldap_bind_dn
+      .or(config_file.ldap_bind_dn)
+      .ok_or_else(|| {
+        ConfigError::Validation(
+          "LDAP bind DN is required (use --ldap-bind-dn or set in config file)"
+            .to_string(),
+        )
+      })?;
+
+    let ldap_password = cli
+      .ldap_password
+      .or(config_file.ldap_password)
+      .ok_or_else(|| {
+        ConfigError::Validation(
+          "LDAP password is required (use --ldap-password or set in config file)"
+            .to_string(),
+        )
+      })?;
+
+    let state_file =
+      cli.state_file.or(config_file.state_file).ok_or_else(|| {
+        ConfigError::Validation(
+          "State file is required (use --state-file or set in config file)"
+            .to_string(),
+        )
+      })?;
 
     Ok(Config {
       log_level,
       log_format,
-      name,
+      ldap_url,
+      ldap_bind_dn,
+      ldap_password,
+      state_file,
+      dry_run: cli.dry_run,
     })
   }
 }

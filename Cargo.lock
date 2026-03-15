@@ -578,6 +578,7 @@ name = "ldap-reconciler"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "json5",
  "ldap-reconciler-lib",
  "ldap3",
  "serde",

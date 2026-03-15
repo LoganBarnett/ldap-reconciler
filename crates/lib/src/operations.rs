@@ -197,6 +197,51 @@ pub fn entry_get(
   }
 }
 
+/// Lists all DNs under a given base DN.
+///
+/// Performs a subtree search starting from the base DN and returns all
+/// distinguished names found. This is useful for finding entries that
+/// should be removed during reconciliation.
+///
+/// # Arguments
+/// * `ldap` - Active LDAP connection
+/// * `base_dn` - Base DN to search under
+///
+/// # Returns
+/// Vector of DNs found under the base DN (including the base DN itself if it exists).
+pub fn entry_list(
+  ldap: &mut LdapConn,
+  base_dn: &str,
+) -> Result<Vec<String>, OperationError> {
+  match ldap.search(
+    base_dn,
+    ldap3::Scope::Subtree,
+    "(objectClass=*)",
+    vec!["1.1"],
+  ) {
+    Ok(result) => match result.success() {
+      Ok((entries, _res)) => {
+        let dns: Vec<String> = entries
+          .into_iter()
+          .map(|entry| SearchEntry::construct(entry).dn)
+          .collect();
+        Ok(dns)
+      }
+      Err(err) => {
+        // Check if this is "no such object" error (rc=32).
+        // If so, return empty list (base DN doesn't exist).
+        if let LdapError::LdapResult { result } = &err {
+          if result.rc == 32 {
+            return Ok(Vec::new());
+          }
+        }
+        Err(OperationError::LdapError(err))
+      }
+    },
+    Err(err) => Err(OperationError::LdapError(err)),
+  }
+}
+
 /// Modifies an entry's attributes in LDAP.
 ///
 /// Uses the LDAP modify operation to update, add, or delete attribute values.

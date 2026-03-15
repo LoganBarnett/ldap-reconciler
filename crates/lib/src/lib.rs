@@ -16,7 +16,7 @@ pub use field_value::{FieldValue, FieldValueError, ResolvedFieldValue};
 pub use ldap3::Mod;
 pub use logging::{init_logging, LogFormat, LogLevel};
 pub use operations::{
-  entry_add, entry_exists, entry_get, entry_modify, entry_remove,
+  entry_add, entry_exists, entry_get, entry_list, entry_modify, entry_remove,
   OperationError,
 };
 pub use reconcile::{

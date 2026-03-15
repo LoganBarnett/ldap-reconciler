@@ -4,7 +4,9 @@
 //! desired state (from JSON5 configuration) with actual state (from LDAP)
 //! and determines what operations are needed to achieve the desired state.
 
-use crate::operations::{entry_add, entry_get, entry_modify, OperationError};
+use crate::operations::{
+  entry_add, entry_get, entry_list, entry_modify, entry_remove, OperationError,
+};
 use crate::reconciled_state::{ReconciledState, ResolvedEntry};
 use ldap3::{LdapConn, Mod};
 use std::collections::{HashMap, HashSet};
@@ -39,17 +41,22 @@ pub struct ReconcileReport {
   pub modified: HashMap<String, Vec<String>>,
   /// Entries that were unchanged
   pub unchanged: Vec<String>,
+  /// Entries that were removed (existed in LDAP but not in desired state)
+  pub removed: Vec<String>,
 }
 
 impl ReconcileReport {
-  /// Returns the total number of entries that were changed (created or modified).
+  /// Returns the total number of entries that were changed (created, modified, or removed).
   pub fn total_changed(&self) -> usize {
-    self.created.len() + self.modified.len()
+    self.created.len() + self.modified.len() + self.removed.len()
   }
 
   /// Returns the total number of entries processed.
   pub fn total_processed(&self) -> usize {
-    self.created.len() + self.modified.len() + self.unchanged.len()
+    self.created.len()
+      + self.modified.len()
+      + self.unchanged.len()
+      + self.removed.len()
   }
 }
 
@@ -248,11 +255,28 @@ fn order_dns_for_creation<'a>(
   dn_list
 }
 
+/// Orders DNs in reverse depth for removal (deepest first).
+///
+/// Returns DNs sorted deep-to-shallow (children before parents).
+/// This ensures child entries are removed before we try to remove parents.
+///
+/// # Arguments
+/// * `dns` - Slice of DN strings
+///
+/// # Returns
+/// Vector of DNs sorted by depth (deepest first)
+fn order_dns_for_removal(dns: &[String]) -> Vec<String> {
+  let mut dn_list: Vec<String> = dns.to_vec();
+  // Sort by depth descending (deepest first)
+  dn_list.sort_by_key(|dn| std::cmp::Reverse(dn_depth(dn)));
+  dn_list
+}
+
 /// Reconciles all entries in the desired state with automatic DN ordering.
 ///
-/// Processes entries in dependency order: parents before children.
-/// This ensures that parent entries exist before attempting to create
-/// child entries, avoiding LDAP "no such object" errors.
+/// Processes entries in dependency order: parents before children for creation,
+/// children before parents for removal. Also removes entries that exist in LDAP
+/// but are not in the desired state.
 ///
 /// # Arguments
 /// * `ldap` - Active LDAP connection
@@ -267,7 +291,8 @@ fn order_dns_for_creation<'a>(
 /// - `ou=users,dc=example,dc=org`
 /// - `dc=example,dc=org`
 ///
-/// They will be processed in the order: dc → ou → uid (shallow to deep)
+/// Creation order: dc → ou → uid (shallow to deep)
+/// Removal order: uid → ou → dc (deep to shallow)
 pub fn reconcile(
   ldap: &mut LdapConn,
   state: &ReconciledState,
@@ -280,7 +305,7 @@ pub fn reconcile(
 
   let mut report = ReconcileReport::default();
 
-  // Process each entry in dependency order
+  // Phase 1: Create/modify entries in dependency order
   for dn in ordered_dns {
     let desired_entry = &resolved[dn];
     let result = reconcile_entry(ldap, dn, desired_entry)?;
@@ -296,6 +321,25 @@ pub fn reconcile(
         report.unchanged.push(dn.clone());
       }
     }
+  }
+
+  // Phase 2: Remove entries that exist but aren't in desired state
+  // Query all existing entries under the base DN
+  let existing_dns = entry_list(ldap, &state.base_dn)?;
+
+  // Find entries to remove (exist in LDAP but not in desired state)
+  let mut to_remove: Vec<String> = existing_dns
+    .into_iter()
+    .filter(|dn| !resolved.contains_key(dn))
+    .collect();
+
+  // Sort for removal: children before parents (reverse depth order)
+  to_remove = order_dns_for_removal(&to_remove);
+
+  // Remove each unwanted entry
+  for dn in to_remove {
+    entry_remove(ldap, &dn)?;
+    report.removed.push(dn);
   }
 
   Ok(report)

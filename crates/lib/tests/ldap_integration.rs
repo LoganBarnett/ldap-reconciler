@@ -608,10 +608,25 @@ fn test_reconcile() {
   println!("✓ Pre-created entry for update test: {}", dn1);
 
   // Create JSON5 configuration with desired state
+  // Include base DN, ou=users and ou=groups to prevent them from being removed
+  let base_dn = &server.config().base_dn;
   let json5 = format!(
     r#"{{
             baseDn: "{}",
             entries: {{
+                "{}": {{
+                    objectClass: ["dcObject", "organization", "top"],
+                    dc: "test",
+                    o: "Test Organization"
+                }},
+                "ou=users,{}": {{
+                    objectClass: ["organizationalUnit", "top"],
+                    ou: "users"
+                }},
+                "ou=groups,{}": {{
+                    objectClass: ["organizationalUnit", "top"],
+                    ou: "groups"
+                }},
                 "{}": {{
                     objectClass: ["inetOrgPerson", "organizationalPerson", "person", "top"],
                     uid: "{}",
@@ -633,11 +648,7 @@ fn test_reconcile() {
                 }}
             }}
         }}"#,
-    server.config().base_dn,
-    dn1,
-    uid1,
-    dn2,
-    uid2
+    base_dn, base_dn, base_dn, base_dn, dn1, uid1, dn2, uid2
   );
 
   // Parse and reconcile
@@ -649,6 +660,7 @@ fn test_reconcile() {
   println!("  Created: {:?}", report.created);
   println!("  Modified: {:?}", report.modified);
   println!("  Unchanged: {:?}", report.unchanged);
+  println!("  Removed: {:?}", report.removed);
 
   // Verify results
   assert_eq!(report.created.len(), 1, "Should have created 1 entry");
@@ -657,7 +669,15 @@ fn test_reconcile() {
   assert_eq!(report.modified.len(), 1, "Should have modified 1 entry");
   assert!(report.modified.contains_key(&dn1), "Should have modified dn1");
 
-  assert_eq!(report.unchanged.len(), 0, "Should have 0 unchanged entries");
+  // base DN, ou=users and ou=groups are unchanged (already existed and match)
+  assert_eq!(
+    report.unchanged.len(),
+    3,
+    "Should have 3 unchanged entries (base DN, ou=users, ou=groups)"
+  );
+
+  // No entries should be removed
+  assert_eq!(report.removed.len(), 0, "Should have 0 removed entries");
 
   // Verify the modified entry has new values
   let entry1 = entry_get(&mut ldap, &dn1)
@@ -711,8 +731,13 @@ fn test_reconcile() {
   );
   assert_eq!(
     report2.unchanged.len(),
-    2,
-    "Should have 2 unchanged entries on second run"
+    5,
+    "Should have 5 unchanged entries on second run (base DN, ou=users, ou=groups, frank, grace)"
+  );
+  assert_eq!(
+    report2.removed.len(),
+    0,
+    "Should have 0 removed entries on second run"
   );
 
   println!("✓ Reconciliation completed successfully");

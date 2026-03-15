@@ -223,7 +223,7 @@ maxsize 1073741824
   ) -> Result<(), Box<dyn std::error::Error>> {
     // Add base DN entry
     let base_attrs = vec![
-      ("objectClass", HashSet::from(["dcObject", "organization"])),
+      ("objectClass", HashSet::from(["dcObject", "organization", "top"])),
       ("dc", HashSet::from(["test"])),
       ("o", HashSet::from(["Test Organization"])),
     ];
@@ -233,7 +233,7 @@ maxsize 1073741824
     // Add ou=users
     let users_dn = format!("ou=users,{}", self.config.base_dn);
     let users_attrs = vec![
-      ("objectClass", HashSet::from(["organizationalUnit"])),
+      ("objectClass", HashSet::from(["organizationalUnit", "top"])),
       ("ou", HashSet::from(["users"])),
     ];
 
@@ -242,7 +242,7 @@ maxsize 1073741824
     // Add ou=groups
     let groups_dn = format!("ou=groups,{}", self.config.base_dn);
     let groups_attrs = vec![
-      ("objectClass", HashSet::from(["organizationalUnit"])),
+      ("objectClass", HashSet::from(["organizationalUnit", "top"])),
       ("ou", HashSet::from(["groups"])),
     ];
 
