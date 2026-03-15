@@ -1,7 +1,7 @@
 {
   description = "LDAP Reconciler - Declarative LDAP state management";
   inputs = {
-    nixpkgs.url = github:NixOS/nixpkgs/25.11;
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay";
     crane.url = "github:ipetkov/crane";
   };
@@ -101,13 +101,16 @@
         src = craneLib.cleanCargoSource ./.;
         buildInputs = with pkgs; [
           openssl
-        ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-          pkgs.darwin.apple_sdk.frameworks.Security
-          pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
-        ];
+        ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs.darwin; [
+          libiconv
+        ]);
         nativeBuildInputs = with pkgs; [
           pkg-config
         ];
+        # Run only unit tests (--lib --bins), skip integration tests in tests/ directories
+        # Integration tests require a running LDAP server which isn't available in Nix builds
+        # This runs 10 unit tests and skips 41 integration tests
+        cargoTestExtraArgs = "--lib --bins";
       };
 
       # Build individual crate packages from workspaceCrates
