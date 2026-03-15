@@ -1,7 +1,7 @@
 {
   description = "LDAP Reconciler - Declarative LDAP state management";
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     rust-overlay.url = "github:oxalica/rust-overlay";
     crane.url = "github:ipetkov/crane";
   };
@@ -99,6 +99,8 @@
       # Common build arguments shared by all crates
       commonArgs = {
         src = craneLib.cleanCargoSource ./.;
+        # LLM: Do NOT add darwin.apple_sdk.frameworks here - they were removed
+        # in nixpkgs 25.11+. Use libiconv for Darwin builds instead.
         buildInputs = with pkgs; [
           openssl
         ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs.darwin; [
