@@ -1,10 +1,10 @@
 #!/bin/sh
 
-# Format all Rust files that are being committed
-cargo fmt -- --check
-if [ $? -ne 0 ]; then
-    echo "Code formatting check failed. Running cargo fmt..."
-    cargo fmt
-    echo "Files have been formatted. Please review and re-add them to your commit."
-    exit 1
-fi
+# Auto-format Rust files and stage changes.
+echo "Running cargo fmt..."
+cargo fmt
+
+# Stage any formatting changes.
+git diff --name-only --cached --diff-filter=ACM | grep '\.rs$' | xargs -r git add
+
+echo "✓ Rust files formatted"
