@@ -92,36 +92,36 @@
     # Uncomment and customize when you want to build Nix packages
     # This will use crane to build your Rust binaries
     # ============================================================================
-    # packages = forAllSystems (system: let
-    #   pkgs = pkgsFor system;
-    #   craneLib = (crane.mkLib pkgs).overrideToolchain (p: p.rust-bin.stable.latest.default);
-    #
-    #   # Common build arguments shared by all crates
-    #   commonArgs = {
-    #     src = craneLib.cleanCargoSource ./.;
-    #     buildInputs = with pkgs; [
-    #       openssl
-    #     ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-    #       pkgs.darwin.apple_sdk.frameworks.Security
-    #       pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
-    #     ];
-    #     nativeBuildInputs = with pkgs; [
-    #       pkg-config
-    #     ];
-    #   };
-    #
-    #   # Build individual crate packages from workspaceCrates
-    #   cratePackages = pkgs.lib.mapAttrs (key: crate:
-    #     craneLib.buildPackage (commonArgs // {
-    #       pname = crate.name;
-    #       cargoExtraArgs = "-p ${crate.name}";
-    #     })
-    #   ) workspaceCrates;
-    #
-    # in cratePackages // {
-    #   # Build all crates together
-    #   default = craneLib.buildPackage commonArgs;
-    # });
+    packages = forAllSystems (system: let
+      pkgs = pkgsFor system;
+      craneLib = (crane.mkLib pkgs).overrideToolchain (p: p.rust-bin.stable.latest.default);
+
+      # Common build arguments shared by all crates
+      commonArgs = {
+        src = craneLib.cleanCargoSource ./.;
+        buildInputs = with pkgs; [
+          openssl
+        ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+          pkgs.darwin.apple_sdk.frameworks.Security
+          pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
+        ];
+        nativeBuildInputs = with pkgs; [
+          pkg-config
+        ];
+      };
+
+      # Build individual crate packages from workspaceCrates
+      cratePackages = pkgs.lib.mapAttrs (key: crate:
+        craneLib.buildPackage (commonArgs // {
+          pname = crate.name;
+          cargoExtraArgs = "-p ${crate.name}";
+        })
+      ) workspaceCrates;
+
+    in cratePackages // {
+      # Build all crates together
+      default = craneLib.buildPackage commonArgs;
+    });
 
     # ============================================================================
     # APPS
