@@ -11,63 +11,63 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DesiredState {
-    /// LDAP base DN (e.g., "dc=proton,dc=org")
-    pub base_dn: String,
+  /// LDAP base DN (e.g., "dc=proton,dc=org")
+  pub base_dn: String,
 
-    /// Desired users
-    #[serde(default)]
-    pub users: HashMap<String, User>,
+  /// Desired users
+  #[serde(default)]
+  pub users: HashMap<String, User>,
 
-    /// Desired groups
-    #[serde(default)]
-    pub groups: HashMap<String, Group>,
+  /// Desired groups
+  #[serde(default)]
+  pub groups: HashMap<String, Group>,
 }
 
 /// A user entry in the desired state.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct User {
-    /// Common name (cn)
-    pub cn: FieldValue,
+  /// Common name (cn)
+  pub cn: FieldValue,
 
-    /// Email address (mail)
-    pub mail: FieldValue,
+  /// Email address (mail)
+  pub mail: FieldValue,
 
-    /// User password
-    #[serde(rename = "userPassword")]
-    pub user_password: FieldValue,
+  /// User password
+  #[serde(rename = "userPassword")]
+  pub user_password: FieldValue,
 
-    /// Optional login shell
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub login_shell: Option<FieldValue>,
+  /// Optional login shell
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub login_shell: Option<FieldValue>,
 
-    /// Optional description
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<FieldValue>,
+  /// Optional description
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub description: Option<FieldValue>,
 
-    /// Additional custom fields
-    #[serde(flatten)]
-    pub custom_fields: HashMap<String, FieldValue>,
+  /// Additional custom fields
+  #[serde(flatten)]
+  pub custom_fields: HashMap<String, FieldValue>,
 }
 
 /// A group entry in the desired state.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct Group {
-    /// Group description
-    pub description: FieldValue,
+  /// Group description
+  pub description: FieldValue,
 
-    /// List of member usernames (will be converted to DNs)
-    pub members: Vec<String>,
+  /// List of member usernames (will be converted to DNs)
+  pub members: Vec<String>,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::path::PathBuf;
+  use super::*;
+  use std::path::PathBuf;
 
-    #[test]
-    fn test_deserialize_desired_state() {
-        let json = r#"
+  #[test]
+  fn test_deserialize_desired_state() {
+    let json = r#"
         {
             "baseDn": "dc=example,dc=org",
             "users": {
@@ -98,26 +98,26 @@ mod tests {
         }
         "#;
 
-        let state: DesiredState = serde_json::from_str(json).unwrap();
-        assert_eq!(state.base_dn, "dc=example,dc=org");
-        assert_eq!(state.users.len(), 1);
-        assert_eq!(state.groups.len(), 1);
+    let state: DesiredState = serde_json::from_str(json).unwrap();
+    assert_eq!(state.base_dn, "dc=example,dc=org");
+    assert_eq!(state.users.len(), 1);
+    assert_eq!(state.groups.len(), 1);
 
-        let alice = state.users.get("alice").unwrap();
-        assert_eq!(
-            alice.cn,
-            FieldValue::Static {
-                value: "Alice Smith".to_string()
-            }
-        );
-        assert_eq!(
-            alice.user_password,
-            FieldValue::InitialFromPath {
-                path: PathBuf::from("/run/secrets/alice-password")
-            }
-        );
+    let alice = state.users.get("alice").unwrap();
+    assert_eq!(
+      alice.cn,
+      FieldValue::Static {
+        value: "Alice Smith".to_string()
+      }
+    );
+    assert_eq!(
+      alice.user_password,
+      FieldValue::InitialFromPath {
+        path: PathBuf::from("/run/secrets/alice-password")
+      }
+    );
 
-        let admins = state.groups.get("admins").unwrap();
-        assert_eq!(admins.members, vec!["alice"]);
-    }
+    let admins = state.groups.get("admins").unwrap();
+    assert_eq!(admins.members, vec!["alice"]);
+  }
 }
