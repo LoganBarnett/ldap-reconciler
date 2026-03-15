@@ -361,3 +361,69 @@ pub fn reconcile(
 
   Ok(report)
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn strs(v: &[&str]) -> Vec<String> {
+    v.iter().map(|s| s.to_string()).collect()
+  }
+
+  #[test]
+  fn dn_depth_counts_components() {
+    assert_eq!(dn_depth("dc=org"), 1);
+    assert_eq!(dn_depth("dc=proton,dc=org"), 2);
+    assert_eq!(dn_depth("ou=users,dc=proton,dc=org"), 3);
+    assert_eq!(dn_depth("uid=alice,ou=users,dc=proton,dc=org"), 4);
+  }
+
+  #[test]
+  fn order_for_creation_shallow_before_deep() {
+    let dns = strs(&[
+      "uid=alice,ou=users,dc=proton,dc=org",
+      "dc=proton,dc=org",
+      "ou=users,dc=proton,dc=org",
+    ]);
+    let ordered: Vec<&String> = order_dns_for_creation(dns.iter());
+    let result: Vec<&str> = ordered.iter().map(|s| s.as_str()).collect();
+    assert_eq!(result[0], "dc=proton,dc=org");
+    assert_eq!(result[1], "ou=users,dc=proton,dc=org");
+    assert_eq!(result[2], "uid=alice,ou=users,dc=proton,dc=org");
+  }
+
+  #[test]
+  fn order_for_creation_uid_before_cn_at_same_depth() {
+    // Users (uid=) must precede groups (cn=) at the same depth so that
+    // referential-integrity overlays don't reject groups whose member
+    // attributes reference not-yet-existing user entries.
+    let dns = strs(&[
+      "cn=admins,ou=groups,dc=proton,dc=org",
+      "uid=alice,ou=users,dc=proton,dc=org",
+      "cn=users,ou=groups,dc=proton,dc=org",
+      "uid=bob,ou=users,dc=proton,dc=org",
+    ]);
+    let ordered: Vec<&String> = order_dns_for_creation(dns.iter());
+    let result: Vec<&str> = ordered.iter().map(|s| s.as_str()).collect();
+    // All uid= entries must appear before any cn= entries.
+    let first_cn = result.iter().position(|s| s.starts_with("cn=")).unwrap();
+    let last_uid = result.iter().rposition(|s| s.starts_with("uid=")).unwrap();
+    assert!(
+      last_uid < first_cn,
+      "uid= entries should precede cn= entries; order was: {result:?}"
+    );
+  }
+
+  #[test]
+  fn order_for_removal_deep_before_shallow() {
+    let dns = strs(&[
+      "dc=proton,dc=org",
+      "uid=alice,ou=users,dc=proton,dc=org",
+      "ou=users,dc=proton,dc=org",
+    ]);
+    let ordered = order_dns_for_removal(&dns);
+    assert_eq!(ordered[0], "uid=alice,ou=users,dc=proton,dc=org");
+    assert_eq!(ordered[1], "ou=users,dc=proton,dc=org");
+    assert_eq!(ordered[2], "dc=proton,dc=org");
+  }
+}
