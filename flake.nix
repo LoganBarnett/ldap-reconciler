@@ -62,6 +62,7 @@
       rust
       pkgs.cargo-sweep
       pkgs.pkg-config
+      pkgs.openldap
       pkgs.openssl
       pkgs.jq
     ];
@@ -71,6 +72,9 @@
       default = (pkgsFor system).mkShell {
         buildInputs = devPackages (pkgsFor system);
         shellHook = ''
+          # Add OpenLDAP's libexec to PATH for slapd
+          export PATH="${(pkgsFor system).openldap}/libexec:$PATH"
+
           echo "LDAP Reconciler development environment"
           echo ""
           echo "Available Cargo packages (use 'cargo build -p <name>'):"
