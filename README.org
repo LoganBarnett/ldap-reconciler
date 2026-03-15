@@ -1,0 +1,412 @@
+#+title:     LDAP Reconciler
+#+author:    Logan Barnett
+#+email:     logustus@gmail.com
+#+date:      <2026-02-09 Sun>
+#+language:  en
+
+* Overview
+
+LDAP Reconciler is a declarative state management tool for LDAP directories.
+It enables you to define your desired LDAP state (users, groups, attributes) in
+a JSON configuration file and automatically reconciles the actual LDAP state to
+match your declaration.
+
+** Why This Exists
+
+Most identity management systems (Authentik, Keycloak, FreeIPA, Kanidm) are
+designed for **imperative management** through web UIs or one-shot API calls.
+This breaks the declarative model that tools like NixOS provide.
+
+*** The Problem
+
+When using these systems with NixOS:
+
+1. **Non-declarative secrets**: API tokens must be generated at runtime and
+   manually distributed
+2. **Nuclear scenario failure**: You can't rebuild from scratch with just your
+   NixOS configuration + agenix secrets
+3. **Manual recovery**: After catastrophic failure, you need a playbook to
+   regenerate tokens and reconfigure services
+
+For example, Kanidm's service account tokens are runtime-generated and cannot
+be pre-provisioned declaratively. This means disaster recovery requires manual
+intervention.
+
+*** The Solution
+
+LDAP Reconciler provides:
+
+1. **Declarative state**: Define users/groups in Nix, generate JSON config
+2. **Incremental reconciliation**: Only apply differences between desired and
+   actual state
+3. **Field-level semantics**: Control whether fields are static, initial-only,
+   or user-managed
+4. **Nuclear recovery**: Rebuild from NixOS config + agenix secrets with zero
+   manual steps
+
+* Architecture
+
+#+begin_src
+facts.nix (users/groups in Nix)
+    ↓
+Nix evaluation
+    ↓
+/etc/ldap-desired-state.json (generated)
+    ↓
+ldap-reconciler (this tool)
+    ↓
+OpenLDAP (via ldapmodify/ldapadd/ldapdelete)
+#+end_src
+
+** Technology Stack
+
+- **LDAP Server**: OpenLDAP with memberof + refint overlays
+- **OIDC Bridge**: Dex or Authelia (provides OIDC on top of LDAP)
+- **State Management**: This tool (ldap-reconciler)
+- **Nix Integration**: NixOS module generates JSON config
+
+** Why OpenLDAP Instead of LLDAP?
+
+LLDAP is simpler but lacks:
+- ~memberof~ overlay (critical for group membership queries)
+- Complex schema extensions
+- Password policies (ppolicy overlay)
+- Replication (for HA scenarios)
+
+OpenLDAP provides these features, and we've already solved the configuration
+complexity in ~nix/nixos-modules/ldap-server.nix~.
+
+** Why Not Kanidm?
+
+Kanidm is excellent but has non-declarative API tokens:
+- Service account tokens are generated at runtime
+- Cannot be pre-provisioned via configuration
+- Breaks the "nuclear recovery" model
+
+See ~nix/nixos-modules/ldap-server.nix~ comments for detailed rationale.
+
+* Field Management Semantics
+
+This tool provides four field management strategies:
+
+** 1. Static (Always Enforce)
+
+Every reconciliation sets the field to the declared value.
+
+#+begin_example
+"description": {
+  "type": "static",
+  "value": "Service Account for Gitea"
+}
+#+end_example
+
+*Use case*: Service account attributes, group descriptions, any field that
+should always match the declaration.
+
+** 2. Initial (Set-Once, Reset-If-Removed)
+
+- If absent: set to initial value
+- If present: leave alone (user can modify)
+- If removed: reset to initial value
+
+#+begin_example
+"loginShell": {
+  "type": "initial",
+  "value": "/bin/bash"
+}
+#+end_example
+
+*Use case*: User passwords, default shells, preferences users can customize.
+
+** 3. StaticFromPath (Read from File, Always Enforce)
+
+Reads value from filesystem path on every reconciliation.
+
+#+begin_example
+"userPassword": {
+  "type": "static-from-path",
+  "path": "/run/agenix.d/gitea-ldap-password"
+}
+#+end_example
+
+*Use case*: Service account passwords from agenix, TLS certificates.
+
+** 4. InitialFromPath (Read from File, Set Once)
+
+Reads value from filesystem path, but only sets initially (like ~Initial~).
+
+#+begin_example
+"userPassword": {
+  "type": "initial-from-path",
+  "path": "/run/agenix.d/alice-ldap-password"
+}
+#+end_example
+
+*Use case*: User passwords from agenix that should be set once, then
+user-managed.
+
+* JSON Configuration Format
+
+The tool expects a JSON file at ~/etc/ldap-desired-state.json~ (or path
+specified via ~--config~):
+
+#+begin_src json
+{
+  "baseDn": "dc=proton,dc=org",
+  "users": {
+    "alice": {
+      "cn": { "type": "static", "value": "Alice Smith" },
+      "mail": { "type": "static", "value": "alice@proton.org" },
+      "userPassword": {
+        "type": "initial-from-path",
+        "path": "/run/agenix.d/alice-ldap-password"
+      },
+      "loginShell": { "type": "initial", "value": "/bin/bash" }
+    },
+    "gitea-service": {
+      "cn": { "type": "static", "value": "Gitea Service Account" },
+      "mail": { "type": "static", "value": "gitea@proton.org" },
+      "userPassword": {
+        "type": "static-from-path",
+        "path": "/run/agenix.d/gitea-ldap-password"
+      }
+    }
+  },
+  "groups": {
+    "admins": {
+      "description": { "type": "static", "value": "System Administrators" },
+      "members": ["alice"]
+    }
+  }
+}
+#+end_src
+
+* NixOS Integration
+
+A NixOS module will generate this JSON from your ~facts.nix~:
+
+#+begin_src nix
+# In your NixOS configuration
+environment.etc."ldap-desired-state.json" = {
+  text = builtins.toJSON {
+    baseDn = "dc=proton,dc=org";
+    users = lib.mapAttrs (name: user: {
+      cn = { type = "static"; value = user.full-name; };
+      mail = { type = "static"; value = user.email; };
+      userPassword = {
+        type = if user.type == "service" then "static-from-path" else "initial-from-path";
+        path = config.age.secrets."${name}-ldap-password".path;
+      };
+    }) facts.network.users;
+    groups = lib.mapAttrs (name: group: {
+      description = { type = "static"; value = group.description; };
+      members = group.members;
+    }) facts.network.groups;
+  };
+};
+
+systemd.services.ldap-reconcile = {
+  wantedBy = [ "multi-user.target" ];
+  after = [ "openldap.service" ];
+  serviceConfig = {
+    Type = "oneshot";
+    ExecStart = "${pkgs.ldap-reconciler}/bin/ldap-reconciler";
+  };
+};
+#+end_src
+
+* Development
+
+** Building
+
+#+begin_src bash
+# Enter development environment
+nix develop
+
+# Build all packages
+cargo build
+
+# Run tests
+cargo test
+
+# Run the reconciler (requires LDAP server)
+cargo run -- --help
+#+end_src
+
+** Project Structure
+
+- ~crates/cli/~ - Main reconciler binary
+  - ~src/main.rs~ - Entry point
+  - ~src/config.rs~ - Configuration loading (CLI args, env vars, config file)
+- ~crates/lib/~ - Shared library
+  - ~src/desired_state.rs~ - JSON schema types
+  - ~src/field_value.rs~ - Field management semantics
+  - ~src/logging.rs~ - Structured logging setup
+
+** Testing Strategy
+
+*** Unit Tests
+
+Test field resolution logic, JSON deserialization, and field semantics:
+
+#+begin_src bash
+cargo test -p ldap-reconciler-lib
+#+end_src
+
+*** Integration Tests (TODO)
+
+Requires a test LDAP server. Plan:
+
+1. Spin up OpenLDAP in a container
+2. Load initial state
+3. Run reconciler with desired state
+4. Query LDAP to verify changes
+5. Run reconciler again (idempotency test)
+
+*** Manual Testing
+
+#+begin_src bash
+# Against your actual LDAP server (be careful!)
+echo '{"baseDn": "dc=test,dc=org", "users": {}, "groups": {}}' > /tmp/test-state.json
+cargo run -- --config /tmp/test-state.json --ldap-url ldaps://localhost:636
+#+end_src
+
+* Design Decisions
+
+** Why Rust?
+
+- **Strong typing**: Field semantics are enforced at compile time
+- **Error handling**: Semantic errors with ~thiserror~ (no ~anyhow~ wrapping)
+- **Performance**: Fast JSON parsing and LDAP operations
+- **NixOS integration**: Easy to package with ~crane~
+
+** Why Separate from Nix?
+
+Nix is bad at:
+- Stateful diffing (comparing current vs desired state)
+- Conditional logic based on runtime state
+- Imperative LDAP operations
+
+A dedicated application excels at these tasks.
+
+** Why Not Terraform?
+
+Terraform's LDAP provider works but:
+- Requires separate TF state management
+- Doesn't integrate cleanly with NixOS lifecycle
+- Adds another DSL to maintain
+
+This tool is purpose-built for NixOS workflows.
+
+** Password Handling Tradeoffs
+
+*** Detecting User vs System Changes
+
+We chose **not** to detect whether a password was changed by the user vs
+removed. This would require:
+- Persistent state between runs, OR
+- LDAP operational attributes (~pwdChangedTime~ with ppolicy overlay)
+
+Instead, our simpler model:
+- ~Initial~ fields: set if absent
+- Removed fields are treated as "absent" and reset
+
+This is deterministic and stateless, at the cost of treating "user removed
+password" the same as "password never set".
+
+*** Alternative Considered
+
+Store a ~.ldap-reconciler-state.json~ with:
+#+begin_src json
+{
+  "alice": {
+    "userPassword": {
+      "initiallySet": true,
+      "lastCheckedTime": "2026-02-09T10:30:00Z"
+    }
+  }
+}
+#+end_src
+
+Rejected because:
+- Adds state file management
+- Complicates error handling (state out of sync)
+- Not meaningfully better than operational attributes
+
+* Future Work
+
+** TODO Reconciliation Algorithm
+
+The core reconciliation logic is not yet implemented. Needed:
+
+1. Query current LDAP state (~ldapsearch~)
+2. Resolve field values (read from paths)
+3. Compute diff (desired vs current)
+4. Apply changes (~ldapadd~, ~ldapmodify~, ~ldapdelete~)
+5. Handle errors gracefully (rollback? log and continue?)
+
+** TODO LDAP Connection Configuration
+
+Add CLI flags / config options for:
+- LDAP URL (~ldaps://~, ~ldapi://~)
+- Bind DN and password
+- TLS settings (CA cert, client cert)
+- Connection pooling
+
+** TODO Dry-Run Mode
+
+Add ~--dry-run~ flag to show what would be changed without applying.
+
+** TODO Metrics / Observability
+
+Emit metrics:
+- Users added/modified/deleted
+- Groups added/modified/deleted
+- Reconciliation duration
+- Errors encountered
+
+** TODO NixOS Module
+
+Create a proper NixOS module at ~nix/nixos-modules/ldap-reconciler.nix~:
+
+#+begin_src nix
+services.ldap-reconciler = {
+  enable = true;
+  ldapUrl = "ldaps://localhost:636";
+  configPath = "/etc/ldap-desired-state.json";
+  schedule = "hourly"; # systemd timer
+};
+#+end_src
+
+* References
+
+** OpenLDAP Configuration
+
+See ~nix/nixos-modules/ldap-server.nix~ in the dotfiles repo for the current
+OpenLDAP setup, including:
+- Schema configuration
+- Overlay setup (memberof, refint, ppolicy)
+- TLS configuration
+- Access control rules
+
+** OIDC Integration
+
+For OIDC support on top of LDAP, consider:
+- **Dex**: Lightweight OIDC provider with LDAP backend connector
+- **Authelia**: Full authentication/authorization platform with LDAP support
+
+Both can front OpenLDAP and provide OIDC tokens for applications like Gitea,
+Grafana, etc.
+
+** Original Discussion
+
+This project emerged from a conversation about declarative identity management
+requirements:
+
+1. ~initialPassword~ semantic for users
+2. ~passwordHash~ always-enforced for service accounts
+3. Nuclear recovery without manual token generation
+4. Full declarative lifecycle (create, modify, delete users/groups)
+
+The key insight: separate the declarative concerns (Nix) from the imperative
+concerns (reconciliation loop).
