@@ -4,6 +4,10 @@
 #+date:      <2026-02-09 Sun>
 #+language:  en
 
+*This project has been succeeded by [[https://github.com/LoganBarnett/nix-hapi][nix-hapi]], a general-purpose declarative
+reconciler for external service APIs that generalises this architecture to
+arbitrary providers.*
+
 * Overview
 
 LDAP Reconciler is a declarative state management tool for LDAP directories.
